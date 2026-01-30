@@ -342,3 +342,66 @@ with tab3:
         use_container_width=True,
         hide_index=True
     )
+
+
+
+
+# ==============================================================================
+# PARTE 6: GESTOR DE BAIXAS (MODIFICAR A PLANILHA REAL)
+# ==============================================================================
+
+st.markdown("---")
+st.subheader("📝 Gestor de Pagamentos Pendentes")
+
+# 1. Filtra apenas o que é DESPESA e está PROJETADO
+# Criamos uma cópia para não bagunçar a análise principal
+df_pendente = df[
+    (df['Tipo_Movimento'] == 'Despesa') & 
+    (df['Status'] == 'Projetado')
+].copy()
+
+if not df_pendente.empty:
+    st.info("Abaixo estão suas contas futuras. Mude o status para 'Realizado' e clique em Salvar.")
+    
+    # 2. Mostra a tabela editável
+    # O usuário pode editar diretamente na tela
+    df_edicao = st.data_editor(
+        df_pendente,
+        column_config={
+            "Status": st.column_config.SelectboxColumn(
+                "Status",
+                options=["Projetado", "Realizado"], # Opções disponíveis
+                required=True
+            ),
+            "Valor": st.column_config.NumberColumn(format="R$ %.2f"),
+            "Data_Transacao": st.column_config.DateColumn("Vencimento", format="DD/MM/YYYY"),
+        },
+        disabled=["Instituicao", "Descricao", "Categoria_Macro"], # Bloqueia edição destas colunas para segurança
+        hide_index=True,
+        use_container_width=True,
+        key="editor_baixas"
+    )
+
+    # 3. Botão para ENVIAR PARA O GOOGLE SHEETS
+    if st.button("💾 Salvar Alterações na Planilha"):
+        
+        # A. Atualiza o DataFrame Principal com as mudanças feitas na tabela
+        # Percorre as linhas editadas e atualiza o original
+        # (Usamos o índice original para garantir que estamos mexendo na linha certa)
+        df.update(df_edicao)
+        
+        # B. Tenta escrever no Google Sheets
+        try:
+            with st.spinner("Enviando dados para o Google Sheets..."):
+                conn.update(data=df) # SOBRESCREVE a aba com os dados novos
+                st.success("✅ Planilha atualizada com sucesso!")
+                st.cache_data.clear() # Limpa a memória para recarregar os dados novos
+                st.rerun() # Recarrega a página automaticamente
+                
+        except Exception as e:
+            st.error("Erro ao salvar na planilha.")
+            st.warning("Verifique se sua planilha está compartilhada como 'Editor' ou se os Secrets têm permissão de escrita.")
+            st.code(str(e))
+
+else:
+    st.success("🎉 Nenhuma conta pendente (Projetada) encontrada para os filtros atuais!")
