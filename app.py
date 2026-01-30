@@ -210,100 +210,135 @@ if df_filtrado.empty:
 
 
 # ==============================================================================
-# PARTE 5: O DASHBOARD VISUAL (GRÁFICOS, KPIs E PREVISIBILIDADE)
+# PARTE 5: O DASHBOARD VISUAL (COM LÓGICA DE ACUMULADO)
 # ==============================================================================
 
 st.markdown("---")
 
-# 1. CÁLCULO DE KPIs (INDICADORES CHAVE)
+# 0. CONFIGURAÇÃO DE VISUALIZAÇÃO (O SELETOR DE MODO)
 # ------------------------------------------------------------------------------
-# Receitas (Dinheiro que entrou)
-total_receita = df_filtrado[df_filtrado['Tipo_Movimento'] == 'Receita']['Valor'].sum()
+col_msg, col_toggle = st.columns([3, 1])
+with col_msg:
+    st.subheader("📊 Visão Estratégica")
+with col_toggle:
+    # O Pulo do Gato: Este botão define se olhamos o passado ou não
+    usar_acumulado = st.toggle("Incluir Saldo Anterior?", value=True)
 
-# Despesas Totais (Tudo que é saída)
-total_despesa = df_filtrado[df_filtrado['Tipo_Movimento'] == 'Despesa']['Valor'].sum()
+# 1. CÁLCULO DO SALDO ANTERIOR (A LÓGICA DO TEMPO)
+# ------------------------------------------------------------------------------
+saldo_anterior = 0.0
 
-# PREVISIBILIDADE: Quanto disso é PROJETADO (Futuro)?
-# Isso responde à sua pergunta: "Quanto ainda tenho que pagar este mês?"
+if usar_acumulado and 'mes_selecionado' in locals() and mes_selecionado:
+    # Descobre o primeiro dia do mês selecionado
+    ano_sel, mes_sel = map(int, mes_selecionado.split('-'))
+    data_inicio_mes = pd.Timestamp(year=ano_sel, month=mes_sel, day=1)
+    
+    # Prepara os dados para cálculo (Cria coluna de valor com sinal correto)
+    # Receita é positivo, Despesa é negativo
+    df['Valor_Sinal'] = df.apply(lambda x: x['Valor'] if x['Tipo_Movimento'] == 'Receita' else -x['Valor'], axis=1)
+    
+    # Filtra o Passado:
+    # 1. Data deve ser anterior ao mês atual
+    # 2. Deve respeitar os filtros de Banco/Categoria que você escolheu na lateral
+    df_passado = df[
+        (df['Data_Transacao'] < data_inicio_mes) &
+        (df['Instituicao'].isin(bancos_selecionados)) &
+        (df['Categoria_Macro'].isin(categorias_selecionadas)) &
+        (df['Status'].isin(status_selecionados))
+    ]
+    
+    saldo_anterior = df_passado['Valor_Sinal'].sum()
+
+# 2. CÁLCULOS DO MÊS ATUAL (KPIs)
+# ------------------------------------------------------------------------------
+# Receitas do Mês
+total_receita_mes = df_filtrado[df_filtrado['Tipo_Movimento'] == 'Receita']['Valor'].sum()
+
+# Despesas do Mês
+total_despesa_mes = df_filtrado[df_filtrado['Tipo_Movimento'] == 'Despesa']['Valor'].sum()
+
+# Resultado Operacional (Só deste mês)
+resultado_mes = total_receita_mes - total_despesa_mes
+
+# Saldo Final (Depende do botão Toggle)
+if usar_acumulado:
+    saldo_final = saldo_anterior + resultado_mes
+    texto_saldo = "Saldo Acumulado (Total)"
+else:
+    saldo_final = resultado_mes
+    texto_saldo = "Resultado do Mês (Isolado)"
+
+# Previsão Futura (Contas a pagar neste mês)
 despesa_futura = df_filtrado[
     (df_filtrado['Tipo_Movimento'] == 'Despesa') & 
     (df_filtrado['Status'] == 'Projetado')
 ]['Valor'].sum()
 
-saldo_liquido = total_receita - total_despesa
-
-# 2. EXIBIÇÃO DOS CARDS (TOPO DO PAINEL)
+# 3. EXIBIÇÃO DOS CARDS
 # ------------------------------------------------------------------------------
-col1, col2, col3, col4 = st.columns(4)
+c1, c2, c3, c4 = st.columns(4)
 
-col1.metric("💰 Entradas Totais", f"R$ {total_receita:,.2f}")
-col2.metric("💸 Saídas Totais", f"R$ {total_despesa:,.2f}", delta=-total_despesa, delta_color="inverse")
-col3.metric("📉 A Pagar (Previsão)", f"R$ {despesa_futura:,.2f}", help="Valor agendado/projetado que ainda sairá da conta")
-col4.metric("equilíbrio Saldo Líquido", f"R$ {saldo_liquido:,.2f}", delta=saldo_liquido)
+if usar_acumulado:
+    c1.metric("🏦 Saldo Anterior", f"R$ {saldo_anterior:,.2f}", help="Dinheiro que sobrou dos meses passados")
+else:
+    c1.metric("💰 Entradas (Mês)", f"R$ {total_receita_mes:,.2f}")
+
+c2.metric("💸 Saídas (Mês)", f"R$ {total_despesa_mes:,.2f}", delta=-total_despesa_mes, delta_color="inverse")
+c3.metric("📉 A Pagar (Previsão)", f"R$ {despesa_futura:,.2f}", help="Valor 'Projetado' que ainda vai sair")
+c4.metric(f"equilíbrio {texto_saldo}", f"R$ {saldo_final:,.2f}", delta=saldo_final)
 
 st.markdown("---")
 
-# 3. ÁREA GRÁFICA (VISÃO ESTRATÉGICA)
+# 4. GRÁFICOS INTELIGENTES
 # ------------------------------------------------------------------------------
-tab1, tab2, tab3 = st.tabs(["📊 Fluxo Diário", "📈 Previsibilidade de Saldo", "📂 Detalhe por Banco"])
+tab1, tab2, tab3 = st.tabs(["📈 Evolução do Saldo", "📊 Fluxo Diário", "📂 Detalhes"])
 
 with tab1:
-    st.subheader("Entradas vs. Saídas (Dia a Dia)")
-    # Gráfico de barras agrupado por dia
+    st.subheader(f"Evolução: {texto_saldo}")
+    
+    # Prepara dados para o gráfico de linha
+    df_grafico = df_filtrado.sort_values("Data_Transacao").copy()
+    
+    # Cria coluna de valor com sinal (+/-)
+    df_grafico['Valor_Real'] = df_grafico.apply(lambda x: x['Valor'] if x['Tipo_Movimento'] == 'Receita' else -x['Valor'], axis=1)
+    
+    # Calcula o acumulado dia a dia
+    if usar_acumulado:
+        # Começa a soma a partir do saldo anterior
+        df_grafico['Saldo_Acumulado'] = df_grafico['Valor_Real'].cumsum() + saldo_anterior
+    else:
+        # Começa do zero
+        df_grafico['Saldo_Acumulado'] = df_grafico['Valor_Real'].cumsum()
+    
+    fig_line = px.line(
+        df_grafico, 
+        x="Data_Transacao", 
+        y="Saldo_Acumulado", 
+        title="Tendência Financeira",
+        markers=True
+    )
+    # Linha de alerta no Zero
+    fig_line.add_hline(y=0, line_dash="dash", line_color="red", annotation_text="Zero")
+    st.plotly_chart(fig_line, use_container_width=True)
+
+with tab2:
+    st.subheader("Entradas vs. Saídas (Diário)")
     fig_bar = px.bar(
         df_filtrado, 
         x="Data_Transacao", 
         y="Valor", 
         color="Tipo_Movimento", 
-        title="Fluxo de Caixa Diário",
-        color_discrete_map={"Receita": "#00CC96", "Despesa": "#EF553B"}, # Verde e Vermelho
-        barmode='group',
-        text_auto='.2s'
+        title="Fluxo de Caixa",
+        color_discrete_map={"Receita": "#00CC96", "Despesa": "#EF553B"},
+        barmode='group'
     )
     st.plotly_chart(fig_bar, use_container_width=True)
 
-with tab2:
-    st.subheader("Simulação de Saldo Acumulado")
-    # Cria uma simulação de como o saldo se comporta ao longo do mês
-    df_saldo = df_filtrado.sort_values("Data_Transacao").copy()
-    # Transforma despesa em negativo para somar corretamente
-    df_saldo['Valor_Real'] = df_saldo.apply(lambda x: x['Valor'] if x['Tipo_Movimento'] == 'Receita' else -x['Valor'], axis=1)
-    df_saldo['Saldo_Acumulado'] = df_saldo['Valor_Real'].cumsum()
-    
-    fig_line = px.line(
-        df_saldo, 
-        x="Data_Transacao", 
-        y="Saldo_Acumulado", 
-        title="Tendência do Saldo (Runway)",
-        markers=True
-    )
-    # Adiciona linha de alerta no Zero
-    fig_line.add_hline(y=0, line_dash="dash", line_color="red", annotation_text="Limite Zero")
-    st.plotly_chart(fig_line, use_container_width=True)
-
 with tab3:
-    st.subheader("Análise por Instituição")
-    # Gráfico de Rosca para ver onde está o dinheiro saindo
-    fig_pie = px.sunburst(
-        df_filtrado[df_filtrado['Tipo_Movimento'] == 'Despesa'], 
-        path=['Instituicao', 'Categoria_Macro'], 
-        values='Valor',
-        title="Onde estou gastando? (Drill-down)"
-    )
-    st.plotly_chart(fig_pie, use_container_width=True)
-
-# 4. TABELA DETALHADA (EXTRATO)
-# ------------------------------------------------------------------------------
-with st.expander("📝 Ver Extrato Completo (Dados Brutos)", expanded=True):
-    # Seleciona colunas mais relevantes para mostrar
-    cols_view = [c for c in ['Data_Transacao', 'Descricao', 'Categoria_Macro', 'Valor', 'Tipo_Movimento', 'Status', 'Instituicao'] if c in df_filtrado.columns]
-    
+    # Tabela simples e limpa
+    cols_view = [c for c in ['Data_Transacao', 'Descricao', 'Valor', 'Tipo_Movimento', 'Status', 'Instituicao'] if c in df_filtrado.columns]
     st.dataframe(
         df_filtrado[cols_view].sort_values(by="Data_Transacao", ascending=False),
         use_container_width=True,
         hide_index=True
     )
-
-# 5. RODAPÉ (CRÉDITOS)
-st.markdown("---")
-st.caption("🚀 Sistema Financeiro Inteligente | Desenvolvido via Streamlit & Python")
