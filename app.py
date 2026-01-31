@@ -335,13 +335,220 @@ with tab2:
     st.plotly_chart(fig_bar, use_container_width=True)
 
 with tab3:
-    # Tabela simples e limpa
-    cols_view = [c for c in ['Data_Transacao', 'Descricao', 'Valor', 'Tipo_Movimento', 'Status', 'Instituicao'] if c in df_filtrado.columns]
-    st.dataframe(
-        df_filtrado[cols_view].sort_values(by="Data_Transacao", ascending=False),
-        use_container_width=True,
-        hide_index=True
-    )
+    # ==========================================================================
+    # NOVO VISUAL - PARTE 1: O DESIGN SYSTEM (CSS)
+    # ==========================================================================
+    st.markdown("""
+    <style>
+    /* 1. Container Geral da Linha do Tempo */
+    .timeline-container {
+        font-family: 'Segoe UI', sans-serif;
+        max-width: 800px;
+        margin: 0 auto;
+    }
+
+    /* 2. Cabeçalho do Dia (Ex: 27 • terça-feira) */
+    .day-header {
+        font-size: 14px;
+        color: #666;
+        margin-top: 25px;
+        margin-bottom: 10px;
+        font-weight: 500;
+        padding-left: 10px;
+    }
+
+    /* 3. Linha da Transação */
+    .transaction-row {
+        display: flex;
+        align-items: center;
+        padding: 12px 10px;
+        background-color: white;
+        border-left: 2px solid #e0e0e0; /* A linha vertical contínua */
+        margin-left: 10px; /* Espaço para alinhar com o cabeçalho */
+        transition: background 0.2s;
+    }
+    .transaction-row:hover {
+        background-color: #f9f9f9;
+        border-left: 2px solid #2196F3; /* Destaque azul ao passar o mouse */
+    }
+
+    /* 4. Ícone (Bolinha Colorida) */
+    .t-icon {
+        width: 35px;
+        height: 35px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+        margin-right: 15px;
+        color: white;
+        font-weight: bold;
+        flex-shrink: 0; /* Não deixa o ícone esmagar */
+    }
+    .bg-green { background-color: #4CAF50; } /* Receita */
+    .bg-red   { background-color: #EF5350; } /* Despesa */
+    .bg-blue  { background-color: #2196F3; } /* Transferencia/Outro */
+
+    /* 5. Textos da Transação */
+    .t-details {
+        flex-grow: 1;
+    }
+    .t-title {
+        font-size: 15px;
+        font-weight: 600;
+        color: #333;
+        margin: 0;
+    }
+    .t-subtitle {
+        font-size: 12px;
+        color: #888;
+        margin: 0;
+    }
+
+    /* 6. Valor (Direita) */
+    .t-value {
+        font-size: 15px;
+        font-weight: 600;
+        text-align: right;
+    }
+    .val-green { color: #4CAF50; }
+    .val-red   { color: #EF5350; }
+
+    /* 7. Resumo Diário (Rodapé do dia) */
+    .daily-summary {
+        margin-left: 12px; /* Alinhado com a linha vertical */
+        padding: 15px;
+        background-color: #f8f9fa;
+        border-radius: 0 0 8px 8px;
+        font-size: 13px;
+        border-left: 2px solid #e0e0e0;
+    }
+    .summary-row {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 4px;
+        color: #555;
+    }
+    .summary-total {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px dashed #ccc;
+        font-weight: bold;
+        font-size: 14px;
+        color: #333;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    # ==========================================================================
+    # PARTE 2: PREPARAÇÃO DOS DADOS (AGRUPAMENTO TEMPORAL)
+    # ==========================================================================
+    
+    if not df_filtrado.empty:
+        # 1. Ordena por data (Mais recente primeiro)
+        df_timeline = df_filtrado.sort_values(by="Data_Transacao", ascending=False).copy()
+        
+        # 2. Extrai a lista de dias únicos que existem na planilha
+        # (Para o loop saber quais dias desenhar)
+        dias_unicos = df_timeline['Data_Transacao'].dt.date.unique()
+
+        # 3. Mapa de Dias da Semana (Para garantir português em qualquer servidor)
+        dias_semana_map = {
+            0: "segunda-feira", 1: "terça-feira", 2: "quarta-feira",
+            3: "quinta-feira", 4: "sexta-feira", 5: "sábado", 6: "domingo"
+        }
+
+        # 4. Abre o Container Principal (A caixa que segura tudo)
+        st.markdown('<div class="timeline-container">', unsafe_allow_html=True)
+        # ==========================================================================
+        # PARTE 3: O LOOP CONSTRUTOR (TIMELINE)
+        # ==========================================================================
+        
+        # Loop Principal: Para cada dia que tem registro...
+        for dia_atual in dias_unicos:
+            
+            # A. Filtra apenas os dados deste dia específico
+            df_dia = df_timeline[df_timeline['Data_Transacao'].dt.date == dia_atual]
+            
+            # B. Cálculos do Rodapé (Resumo do Dia)
+            soma_receita = df_dia[df_dia['Tipo_Movimento'] == 'Receita']['Valor'].sum()
+            soma_despesa = df_dia[df_dia['Tipo_Movimento'] == 'Despesa']['Valor'].sum()
+            saldo_dia_final = soma_receita - soma_despesa
+            
+            # C. Renderiza o CABEÇALHO DO DIA (Ex: 27 • terça-feira)
+            dia_semana_texto = dias_semana_map[dia_atual.weekday()]
+            st.markdown(f"""
+                <div class="day-header">
+                    {dia_atual.day} • {dia_semana_texto}
+                </div>
+            """, unsafe_allow_html=True)
+            
+            # D. Loop das Transações (Linha a Linha dentro do dia)
+            for _, row in df_dia.iterrows():
+                
+                # Definições visuais baseadas no tipo (Receita vs Despesa)
+                tipo = row['Tipo_Movimento']
+                valor = row['Valor']
+                descricao = row['Descricao']
+                banco = row['Instituicao']
+                categoria = row['Categoria_Macro']
+                
+                if tipo == 'Receita':
+                    cor_bg = "bg-green"
+                    cor_val = "val-green"
+                    sinal = "+"
+                    icone_letra = "💰" # Ou primeira letra: categoria[0].upper()
+                else:
+                    cor_bg = "bg-red"
+                    cor_val = "val-red"
+                    sinal = "-"
+                    # Tenta pegar um emoji baseado na categoria (opcional) ou usa ícone genérico
+                    icone_letra = categoria[0].upper() if categoria else "💸"
+
+                # Renderiza a LINHA DA TRANSAÇÃO
+                st.markdown(f"""
+                <div class="transaction-row">
+                    <div class="t-icon {cor_bg}">{icone_letra}</div>
+                    <div class="t-details">
+                        <p class="t-title">{descricao}</p>
+                        <p class="t-subtitle">{categoria} • {banco}</p>
+                    </div>
+                    <div class="t-value {cor_val}">
+                        {sinal}R$ {valor:,.2f}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # E. Renderiza o RODAPÉ DO DIA (Totais)
+            # Mostra apenas se houver movimentação mista ou para fechar o bloco visualmente
+            st.markdown(f"""
+            <div class="daily-summary">
+                <div class="summary-row">
+                    <span>🔵 Total Crédito</span>
+                    <span class="val-green">+R$ {soma_receita:,.2f}</span>
+                </div>
+                <div class="summary-row">
+                    <span>🔴 Total Débito</span>
+                    <span class="val-red">-R$ {soma_despesa:,.2f}</span>
+                </div>
+                <div class="summary-total">
+                    <span>Saldo do dia</span>
+                    <span>R$ {saldo_dia_final:,.2f}</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # 5. Fecha o Container Principal
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    else:
+        st.info("Nenhum dado encontrado para exibir no extrato detalhado.")
+
+
+
+
 
 
 
