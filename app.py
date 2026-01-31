@@ -296,7 +296,7 @@ st.markdown("---")
 
 # 4. GRÁFICOS INTELIGENTES
 # ------------------------------------------------------------------------------
-tab1, tab2, tab3 = st.tabs(["📈 Evolução do Saldo", "📊 Fluxo Diário", "📂 Detalhes"])
+tab1, tab2, tab3 = st.tabs(["📈 Evolução do Saldo", "📊 Fluxo Diário", "📂 Extrato"])
 
 with tab1:
     st.subheader(f"Evolução: {texto_saldo}")
