@@ -448,33 +448,47 @@ with tab3:
     </style>
     """, unsafe_allow_html=True)
     # ==========================================================================
-    # PARTE 2: PREPARAÇÃO DOS DADOS (AGRUPAMENTO TEMPORAL)
+    # PARTE 2: PREPARAÇÃO DOS DADOS (AGRUPAMENTO E CÁLCULO DE SALDO)
     # ==========================================================================
     
     if not df_filtrado.empty:
-        # 1. Ordena por data (Mais recente primeiro)
-        df_timeline = df_filtrado.sort_values(by="Data_Transacao", ascending=False).copy()
+        # 1. Cria uma cópia para cálculo matemático (Ordenação Cronológica: Antigo -> Novo)
+        df_calc = df_filtrado.copy()
+        df_calc['Data_Transacao'] = pd.to_datetime(df_calc['Data_Transacao'])
+        df_calc = df_calc.sort_values(by=["Data_Transacao"], ascending=True)
+
+        # 2. Cria coluna de Valor Real (+ para Receita, - para Despesa)
+        df_calc['Valor_Real'] = df_calc.apply(lambda x: x['Valor'] if x['Tipo_Movimento'] == 'Receita' else -x['Valor'], axis=1)
+
+        # 3. Calcula o Saldo Acumulado (Runway)
+        # Verifica se deve incluir o histórico passado (variavel criada na Parte 5)
+        base_inicial = saldo_anterior if 'saldo_anterior' in locals() and usar_acumulado else 0.0
         
-        # 2. Extrai a lista de dias únicos que existem na planilha
-        # (Para o loop saber quais dias desenhar)
+        # A mágica: vai somando linha a linha
+        df_calc['Saldo_Acumulado_Ate_Aqui'] = df_calc['Valor_Real'].cumsum() + base_inicial
+
+        # 4. Inverte para visualização (Visual: Novo -> Antigo)
+        # Agora temos o saldo calculado corretamente em cada linha
+        df_timeline = df_calc.sort_values(by=["Data_Transacao"], ascending=False)
+        
+        # 5. Extrai dias únicos para o loop
         dias_unicos = df_timeline['Data_Transacao'].dt.date.unique()
 
-        # 3. Mapa de Dias da Semana (Para garantir português em qualquer servidor)
+        # 6. Mapa de Dias da Semana
         dias_semana_map = {
             0: "segunda-feira", 1: "terça-feira", 2: "quarta-feira",
             3: "quinta-feira", 4: "sexta-feira", 5: "sábado", 6: "domingo"
         }
 
-        # 4. Abre o Container Principal (A caixa que segura tudo)
+        # 7. Abre o Container Principal
         st.markdown('<div class="timeline-container">', unsafe_allow_html=True)
         # ==========================================================================
-        # PARTE 3: O LOOP CONSTRUTOR (TIMELINE)
+        # PARTE 3: O LOOP CONSTRUTOR (TIMELINE COM SALDO TOTAL)
         # ==========================================================================
         
-        # Loop Principal: Para cada dia que tem registro...
         for dia_atual in dias_unicos:
             
-            # A. Filtra apenas os dados deste dia específico
+            # A. Filtra dados deste dia
             df_dia = df_timeline[df_timeline['Data_Transacao'].dt.date == dia_atual]
             
             # B. Cálculos do Rodapé (Resumo do Dia)
@@ -482,7 +496,12 @@ with tab3:
             soma_despesa = df_dia[df_dia['Tipo_Movimento'] == 'Despesa']['Valor'].sum()
             saldo_dia_final = soma_receita - soma_despesa
             
-            # C. Renderiza o CABEÇALHO DO DIA (Ex: 27 • terça-feira)
+            # CÁLCULO DO SALDO TOTAL (ACUMULADO) DO DIA
+            # Como ordenamos do mais recente para o mais antigo, 
+            # o saldo da PRIMEIRA linha deste dia representa o saldo no FECHAMENTO deste dia.
+            saldo_total_acumulado = df_dia.iloc[0]['Saldo_Acumulado_Ate_Aqui']
+            
+            # C. Renderiza o CABEÇALHO DO DIA
             dia_semana_texto = dias_semana_map[dia_atual.weekday()]
             st.markdown(f"""
                 <div class="day-header">
@@ -490,10 +509,9 @@ with tab3:
                 </div>
             """, unsafe_allow_html=True)
             
-            # D. Loop das Transações (Linha a Linha dentro do dia)
+            # D. Loop das Transações
             for _, row in df_dia.iterrows():
                 
-                # Definições visuais baseadas no tipo (Receita vs Despesa)
                 tipo = row['Tipo_Movimento']
                 valor = row['Valor']
                 descricao = row['Descricao']
@@ -504,15 +522,13 @@ with tab3:
                     cor_bg = "bg-green"
                     cor_val = "val-green"
                     sinal = "+"
-                    icone_letra = "💰" # Ou primeira letra: categoria[0].upper()
+                    icone_letra = "💰" 
                 else:
                     cor_bg = "bg-red"
                     cor_val = "val-red"
                     sinal = "-"
-                    # Tenta pegar um emoji baseado na categoria (opcional) ou usa ícone genérico
                     icone_letra = categoria[0].upper() if categoria else "💸"
 
-                # Renderiza a LINHA DA TRANSAÇÃO
                 st.markdown(f"""
                 <div class="transaction-row">
                     <div class="t-icon {cor_bg}">{icone_letra}</div>
@@ -526,8 +542,7 @@ with tab3:
                 </div>
                 """, unsafe_allow_html=True)
             
-            # E. Renderiza o RODAPÉ DO DIA (Totais)
-            # Mostra apenas se houver movimentação mista ou para fechar o bloco visualmente
+            # E. Renderiza o RODAPÉ DO DIA (Agora com 4 linhas)
             st.markdown(f"""
             <div class="daily-summary">
                 <div class="summary-row">
@@ -538,9 +553,13 @@ with tab3:
                     <span>🔴 Total Débito</span>
                     <span class="val-red">-R$ {soma_despesa:,.2f}</span>
                 </div>
-                <div class="summary-total">
-                    <span>Saldo do dia</span>
+                <div class="summary-total" style="border-top: 1px dashed #ccc; padding-top:5px; margin-top:5px;">
+                    <span style="font-weight:normal;">Saldo do dia (Isolado)</span>
                     <span>R$ {saldo_dia_final:,.2f}</span>
+                </div>
+                <div class="summary-total" style="color:#2196F3; font-size:15px; border-top:none; margin-top:2px;">
+                    <span>🏦 Saldo Total (Acumulado)</span>
+                    <span>R$ {saldo_total_acumulado:,.2f}</span>
                 </div>
             </div>
             """, unsafe_allow_html=True)
