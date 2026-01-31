@@ -110,9 +110,14 @@ with st.spinner("🛠️ Refinando e padronizando dados..."):
         st.info("Sua planilha precisa ter uma coluna com datas de vencimento/pagamento.")
         st.stop()
 
-    # 3. Tratamento de VALORES (Numérico)
+   # 3. Tratamento de VALORES (Blindado para R$ Brasileiro)
     if 'Valor' in df.columns:
-        # Garante que é número float (decimal)
+        # A. Se a coluna for lida como Texto (com vírgulas e pontos)
+        if df['Valor'].dtype == 'object':
+            # Remove o ponto de milhar (1.000 -> 1000) e troca a vírgula por ponto (50,00 -> 50.00)
+            df['Valor'] = df['Valor'].astype(str).str.replace('.', '', regex=False).str.replace(',', '.')
+        
+        # B. Converte finalmente para número
         df['Valor'] = pd.to_numeric(df['Valor'], errors='coerce').fillna(0.0)
     else:
         st.error("🚨 Coluna Obrigatória Ausente: 'Valor'")
